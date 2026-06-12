@@ -319,12 +319,10 @@ export class ParticleScene {
     const targetOpenPalm = state?.openPalmStrength ?? 0;
     const rawHandWorld = hasHand ? this.screenToWorld(state!.handCenter) : this.burstOrigin;
     const rawIndexWorld = hasHand ? this.screenToWorld(state!.indexTip) : rawHandWorld;
-    const pinchHold = state?.pinchHold ?? false;
-    const pinchStart = state?.pinchStart ?? false;
     const targetPinchStrength = state?.pinchStrength ?? 0;
-    const targetPinchBlend = hasHand ? (pinchHold || pinchStart ? targetPinchStrength : targetPinchStrength * 0.16) : 0;
+    const targetPinchBlend = hasHand ? targetPinchStrength : 0;
 
-    this.pinchBlend = lerp(this.pinchBlend, targetPinchBlend, 1 - Math.pow(0.78, dt));
+    this.pinchBlend = lerp(this.pinchBlend, targetPinchBlend, 1 - Math.pow(0.68, dt));
     this.openPalmBlend = lerp(this.openPalmBlend, targetOpenPalm, 1 - Math.pow(0.84, dt));
     this.handInfluenceBlend = lerp(this.handInfluenceBlend, hasHand ? 1 : 0, 1 - Math.pow(0.82, dt));
     this.handWind.x *= Math.pow(0.92, dt);
@@ -391,26 +389,7 @@ export class ParticleScene {
         const pz = this.positions[i3 + 2];
         distToHand = Math.hypot(px - handWorld.x, py - handWorld.y, pz - handWorld.z);
 
-        if (pinchStrength > 0.04) {
-          // 捏合强度用连续插值驱动，避免一进入 pinch 状态就突然缩小。
-          const gatherRadius = 0.42 + (1 - pinchStrength) * 1.55 + seed * 0.95;
-          const dir = {
-            x: this.randomDirs[i3 + 0],
-            y: this.randomDirs[i3 + 1],
-            z: this.randomDirs[i3 + 2],
-          };
-          const falloff = 1 + clamp(1 - distToHand * 0.12, 0, 1);
-          const vortex = phase * 5.5 + pinchStrength * 4;
-          const ringX = Math.cos(vortex) * gatherRadius;
-          const ringY = Math.sin(vortex) * gatherRadius;
-          targetX = indexWorld.x + ringX * 0.85 + dir.x * gatherRadius * 0.55 * falloff;
-          targetY = indexWorld.y + ringY * 0.85 + dir.y * gatherRadius * 0.55 * falloff;
-          targetZ = indexWorld.z + dir.z * gatherRadius * falloff;
-
-          this.velocities[i3 + 0] += (-ringY * 0.014 + this.handWind.x * 0.025) * dt;
-          this.velocities[i3 + 1] += (ringX * 0.014 + this.handWind.y * 0.025) * dt;
-          this.velocities[i3 + 2] += Math.sin(vortex) * 0.008 * dt;
-        } else if (openPalm > 0.3) {
+        if (openPalm > 0.3 && pinchStrength < 0.75) {
           // 张开手掌时整体放大扩散
           const disperse = 1 + openPalm * 0.82;
           targetX = baseX * disperse + this.randomDirs[i3 + 0] * openPalm * 2.2;
@@ -431,6 +410,32 @@ export class ParticleScene {
           targetX += this.randomDirs[i3 + 0] * ripple - (py - indexWorld.y) * wave * 0.03;
           targetY += this.randomDirs[i3 + 1] * ripple + (px - indexWorld.x) * wave * 0.03;
           targetZ += this.randomDirs[i3 + 2] * ripple;
+        }
+
+        if (pinchStrength > 0.001) {
+          // 关键点：聚合目标和当前目标按 pinchStrength 连续混合，手指距离决定聚合程度。
+          const dir = {
+            x: this.randomDirs[i3 + 0],
+            y: this.randomDirs[i3 + 1],
+            z: this.randomDirs[i3 + 2],
+          };
+          const gatherRadius = 0.42 + (1 - pinchStrength) * 2.1 + seed * (1.25 - pinchStrength * 0.55);
+          const falloff = 1 + clamp(1 - distToHand * 0.1, 0, 1);
+          const vortex = phase * (2.4 + pinchStrength * 3.2) + pinchStrength * 4;
+          const ringX = Math.cos(vortex) * gatherRadius;
+          const ringY = Math.sin(vortex) * gatherRadius;
+          const gatherX = indexWorld.x + ringX * 0.74 + dir.x * gatherRadius * 0.58 * falloff;
+          const gatherY = indexWorld.y + ringY * 0.74 + dir.y * gatherRadius * 0.58 * falloff;
+          const gatherZ = indexWorld.z + dir.z * gatherRadius * falloff;
+          const mix = pinchStrength * pinchStrength * (3 - 2 * pinchStrength);
+
+          targetX = lerp(targetX, gatherX, mix);
+          targetY = lerp(targetY, gatherY, mix);
+          targetZ = lerp(targetZ, gatherZ, mix);
+
+          this.velocities[i3 + 0] += (-ringY * 0.012 + this.handWind.x * 0.02) * mix * dt;
+          this.velocities[i3 + 1] += (ringX * 0.012 + this.handWind.y * 0.02) * mix * dt;
+          this.velocities[i3 + 2] += Math.sin(vortex) * 0.007 * mix * dt;
         }
 
         if (flick > 0.06) {

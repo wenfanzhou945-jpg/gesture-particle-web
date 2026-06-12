@@ -106,7 +106,8 @@ export const computeHandGestureFromLandmarks = (
   const normalizedPinch = palmSize > 0 ? pinchDistance / palmSize : 1;
 
   const normalizedPinchClamped = clamp(normalizedPinch, 0.1, 1.3);
-  const rawPinchStrength = clamp(1 - (normalizedPinchClamped - 0.16) / 0.45, 0, 1);
+  const pinchLinear = clamp(1 - (normalizedPinchClamped - 0.2) / 0.72, 0, 1);
+  const rawPinchStrength = pinchLinear * pinchLinear * (3 - 2 * pinchLinear);
 
   const spanTips = distance3D(w, thumb) + distance3D(w, index) + distance3D(w, middle) + distance3D(w, ring) + distance3D(w, pinky);
   const avgSpan = spanTips / 5;
@@ -120,7 +121,7 @@ export const computeHandGestureFromLandmarks = (
 
   const shouldSmooth = prevState.detected && prevState.source === "camera";
   const smoothedHandCenter = shouldSmooth ? smoothPoint(handCenter, prevState.handCenter, 0.46) : handCenter;
-  const smoothedPinchStrength = shouldSmooth ? lerp(prevState.pinchStrength, rawPinchStrength, 0.32) : rawPinchStrength;
+  const smoothedPinchStrength = shouldSmooth ? lerp(prevState.pinchStrength, rawPinchStrength, 0.4) : rawPinchStrength;
   const smoothedOpenPalmStrength = shouldSmooth ? lerp(prevState.openPalmStrength, rawOpenPalmStrength, 0.28) : rawOpenPalmStrength;
 
   const startThreshold = 0.38;
