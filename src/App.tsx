@@ -94,6 +94,7 @@ export function App(): JSX.Element {
   const [hasCanvasPreviewFrame, setHasCanvasPreviewFrame] = useState<boolean>(false);
   const [isLogVisible, setIsLogVisible] = useState<boolean>(false);
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const [isHudHidden, setIsHudHidden] = useState<boolean>(false);
 
   const manualTouchRef = useRef<ManualTouchState>({
     pointers: new Map(),
@@ -762,13 +763,28 @@ export function App(): JSX.Element {
     return () => events.forEach((name) => video.removeEventListener(name, emit));
   }, []);
 
+  const isPreviewActuallyVisible = isPreviewVisible && !isHudHidden;
+
   return (
-    <div className="app">
+    <div className={`app ${isHudHidden ? "immersive" : ""}`}>
       <div ref={sceneContainerRef} className="scene-wrap" />
 
-      <div className="hud">
-        <div className="title">手势控制发光粒子球</div>
-        <p className="hint">请用手机浏览器打开，点击启动摄像头，伸出手掌进行交互</p>
+      {isHudHidden && (
+        <button type="button" className="hud-toggle" onClick={() => setIsHudHidden(false)}>
+          显示
+        </button>
+      )}
+
+      <div className={`hud ${isHudHidden ? "hidden" : ""}`}>
+        <div className="hud-head">
+          <div>
+            <div className="title">手势能量雪暴</div>
+            <p className="hint">点击启动摄像头，移动手掌、捏合、张开手掌控制粒子</p>
+          </div>
+          <button type="button" className="icon-button" onClick={() => setIsHudHidden(true)} aria-label="隐藏界面">
+            隐藏
+          </button>
+        </div>
 
         <div className="status-list">
           {statusList.map((text, index) => (
@@ -834,7 +850,7 @@ export function App(): JSX.Element {
         </div>
       )}
 
-      <div className={`camera-preview ${isPreviewVisible ? "show" : "hide"} ${hasCanvasPreviewFrame ? "canvas-ready" : ""}`}>
+      <div className={`camera-preview ${isPreviewActuallyVisible ? "show" : "hide"} ${hasCanvasPreviewFrame ? "canvas-ready" : ""}`}>
         <video
           ref={videoRef}
           className={facingMode === "user" ? "mirror" : ""}

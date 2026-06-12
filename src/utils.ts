@@ -128,3 +128,67 @@ export const createRadialGlowTexture = (): THREE.Texture => {
   texture.needsUpdate = true;
   return texture;
 };
+
+export const createSnowCrystalTexture = (): THREE.Texture => {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    const fallback = new THREE.Texture();
+    fallback.needsUpdate = true;
+    return fallback;
+  }
+
+  const cx = size / 2;
+  const cy = size / 2;
+  const radius = size / 2;
+  ctx.clearRect(0, 0, size, size);
+
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  glow.addColorStop(0, "rgba(255,255,255,1)");
+  glow.addColorStop(0.22, "rgba(236,244,255,0.84)");
+  glow.addColorStop(0.48, "rgba(159,198,255,0.34)");
+  glow.addColorStop(1, "rgba(20,40,90,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = "rgba(255,255,255,0.92)";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.shadowColor = "rgba(180,210,255,0.95)";
+  ctx.shadowBlur = 10;
+
+  for (let i = 0; i < 6; i += 1) {
+    ctx.save();
+    ctx.rotate((Math.PI * 2 * i) / 6);
+    ctx.lineWidth = 2.1;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(radius * 0.46, 0);
+    ctx.stroke();
+
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.moveTo(radius * 0.22, 0);
+    ctx.lineTo(radius * 0.34, radius * 0.11);
+    ctx.moveTo(radius * 0.22, 0);
+    ctx.lineTo(radius * 0.34, -radius * 0.11);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.fillStyle = "rgba(255,255,255,0.96)";
+  ctx.beginPath();
+  ctx.arc(0, 0, 4.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+};

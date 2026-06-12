@@ -19,8 +19,8 @@ body,
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, "PingFang SC", "Noto Sans CJK SC", sans-serif;
-  background: #060011;
-  color: #f3e7ff;
+  background: radial-gradient(circle at 50% 48%, #150227 0%, #060011 52%, #010008 100%);
+  color: #f7efff;
 }
 
 .app {
@@ -45,27 +45,48 @@ body {
 
 .hud {
   position: fixed;
-  inset: 8px 10px auto 10px;
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
   z-index: 10;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
+  width: min(520px, calc(100% - 20px));
+  pointer-events: auto;
+  padding: 11px;
+  border: 1px solid rgba(230, 212, 255, 0.2);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(20, 10, 34, 0.72), rgba(6, 1, 17, 0.58));
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(16px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.hud.hidden {
+  opacity: 0;
+  transform: translateY(16px);
   pointer-events: none;
-  max-width: calc(100% - 20px);
+}
+
+.hud-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .title {
-  font-size: 17px;
+  font-size: 16px;
   line-height: 1.2;
-  font-weight: 700;
-  letter-spacing: 0.2px;
+  font-weight: 750;
 }
 
 .hint {
-  margin: 0;
+  margin: 3px 0 0;
   font-size: 12px;
-  color: #d9c9ff;
-  opacity: 0.95;
+  color: #dacdff;
+  opacity: 0.9;
 }
 
 .status-list {
@@ -77,39 +98,62 @@ body {
 .status-list span {
   font-size: 11px;
   border-radius: 999px;
-  padding: 3px 8px;
-  background: rgba(150, 110, 214, 0.26);
-  color: #f7e8ff;
-  border: 1px solid rgba(206, 175, 255, 0.35);
+  padding: 3px 7px;
+  background: rgba(138, 105, 214, 0.22);
+  color: #f7f0ff;
+  border: 1px solid rgba(215, 200, 255, 0.26);
   white-space: nowrap;
 }
 
 .button-row {
   display: flex;
-  gap: 6px;
+  gap: 7px;
   flex-wrap: wrap;
-  pointer-events: auto;
 }
 
 button {
-  border: 0;
-  border-radius: 12px;
-  padding: 8px 12px;
-  color: #111;
-  background: linear-gradient(180deg, #ffd2ff, #c38cff);
-  font-size: 13px;
-  font-weight: 600;
-  min-height: 36px;
-  min-width: 94px;
+  border: 1px solid rgba(235, 222, 255, 0.24);
+  border-radius: 999px;
+  padding: 7px 11px;
+  color: #fdf8ff;
+  background: linear-gradient(180deg, rgba(255, 220, 255, 0.22), rgba(116, 72, 190, 0.26));
+  font-size: 12px;
+  font-weight: 650;
+  min-height: 32px;
+  min-width: 78px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  touch-action: manipulation;
+}
+
+button:active {
+  transform: translateY(1px);
 }
 
 button.active {
-  background: linear-gradient(180deg, #ffd8fd, #ff95ec);
-  box-shadow: 0 0 10px rgba(255, 185, 253, 0.36);
+  color: #12091c;
+  background: linear-gradient(180deg, #f9f3ff, #b8dcff 48%, #ff9deb);
+  box-shadow: 0 0 16px rgba(170, 210, 255, 0.32);
+}
+
+.icon-button,
+.hud-toggle {
+  min-width: 54px;
+  white-space: nowrap;
+}
+
+.hud-toggle {
+  position: fixed;
+  z-index: 16;
+  right: max(10px, env(safe-area-inset-right));
+  top: max(10px, env(safe-area-inset-top));
+  padding: 7px 10px;
+  background: rgba(10, 4, 20, 0.46);
+  backdrop-filter: blur(12px);
+  color: #f9efff;
 }
 
 .quality-row button {
-  min-width: 78px;
+  min-width: 66px;
 }
 
 .state-strip {
@@ -118,15 +162,15 @@ button.active {
   gap: 6px;
   font-size: 11px;
   color: #efecff;
-  opacity: 0.95;
+  opacity: 0.88;
   padding: 2px 0 4px;
 }
 
 .state-strip span {
-  border: 1px solid rgba(240, 223, 255, 0.3);
+  border: 1px solid rgba(240, 223, 255, 0.22);
   border-radius: 999px;
-  padding: 2px 8px;
-  background: rgba(120, 70, 160, 0.35);
+  padding: 2px 7px;
+  background: rgba(56, 30, 88, 0.32);
 }
 
 .log-panel {
@@ -181,17 +225,18 @@ button.active {
 
 .camera-preview {
   position: fixed;
-  right: 10px;
-  bottom: 10px;
-  width: min(35vw, 140px);
+  right: max(10px, env(safe-area-inset-right));
+  top: max(10px, env(safe-area-inset-top));
+  width: min(30vw, 116px);
   aspect-ratio: 4 / 3;
-  border: 2px solid rgba(255, 213, 255, 0.5);
-  border-radius: 10px;
+  border: 1px solid rgba(231, 218, 255, 0.28);
+  border-radius: 14px;
   transform: translateZ(0);
   z-index: 12;
   background: #000;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.18s ease, transform 0.18s ease;
   overflow: hidden;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
 }
 
 .camera-preview video,
@@ -223,6 +268,7 @@ button.active {
 
 .camera-preview.hide {
   opacity: 0;
+  transform: translateY(-8px) scale(0.94);
   pointer-events: none;
 }
 
@@ -232,8 +278,10 @@ button.active {
 
 @media (min-width: 768px) {
   .hud {
-    inset: 12px 16px auto 16px;
-    max-width: 460px;
+    left: 16px;
+    right: auto;
+    bottom: 16px;
+    width: 500px;
   }
 
   .button-row {
@@ -241,11 +289,22 @@ button.active {
   }
 
   .camera-preview {
-    width: 190px;
+    width: 160px;
   }
 
   .status-list span,
   .state-strip span {
     font-size: 12px;
+  }
+}
+
+@media (max-height: 560px) {
+  .hint,
+  .state-strip {
+    display: none;
+  }
+
+  .hud {
+    gap: 6px;
   }
 }
