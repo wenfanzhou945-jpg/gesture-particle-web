@@ -1,4 +1,4 @@
-import { clamp, distance2D, distance3D, Vec2, Vec3 } from "./utils";
+import { clamp, distance2D, distance3D, lerp, Vec2, Vec3 } from "./utils";
 
 export const LANDMARK_INDEX = {
   WRIST: 0,
@@ -106,11 +106,22 @@ export const computeHandGestureFromLandmarks = (
   const normalizedPinch = palmSize > 0 ? pinchDistance / palmSize : 1;
 
   const normalizedPinchClamped = clamp(normalizedPinch, 0.1, 1.3);
-  const pinchStrength = clamp(1 - (normalizedPinchClamped - 0.16) / 0.45, 0, 1);
+  const rawPinchStrength = clamp(1 - (normalizedPinchClamped - 0.16) / 0.45, 0, 1);
 
   const spanTips = distance3D(w, thumb) + distance3D(w, index) + distance3D(w, middle) + distance3D(w, ring) + distance3D(w, pinky);
   const avgSpan = spanTips / 5;
-  const openPalmStrength = clamp((avgSpan / (palmSize + 1e-6) - 1.05) / 0.55, 0, 1);
+  const rawOpenPalmStrength = clamp((avgSpan / (palmSize + 1e-6) - 1.05) / 0.55, 0, 1);
+
+  const smoothPoint = (current: Vec3, previous: Vec3, amount: number): Vec3 => ({
+    x: lerp(previous.x, current.x, amount),
+    y: lerp(previous.y, current.y, amount),
+    z: lerp(previous.z, current.z, amount),
+  });
+
+  const shouldSmooth = prevState.detected && prevState.source === "camera";
+  const smoothedHandCenter = shouldSmooth ? smoothPoint(handCenter, prevState.handCenter, 0.46) : handCenter;
+  const smoothedPinchStrength = shouldSmooth ? lerp(prevState.pinchStrength, rawPinchStrength, 0.32) : rawPinchStrength;
+  const smoothedOpenPalmStrength = shouldSmooth ? lerp(prevState.openPalmStrength, rawOpenPalmStrength, 0.28) : rawOpenPalmStrength;
 
   const startThreshold = 0.38;
   const endThreshold = 0.52;
@@ -133,7 +144,7 @@ export const computeHandGestureFromLandmarks = (
   return {
     detected: true,
     source: "camera",
-    handCenter,
+    handCenter: smoothedHandCenter,
     thumbTip: { x: thumb.x * videoSize.width, y: thumb.y * videoSize.height, z: thumb.z * 80 },
     indexTip: { x: index.x * videoSize.width, y: index.y * videoSize.height, z: index.z * 80 },
     middleTip: { x: middle.x * videoSize.width, y: middle.y * videoSize.height, z: middle.z * 80 },
@@ -142,8 +153,8 @@ export const computeHandGestureFromLandmarks = (
     pinchDistance,
     palmSize,
     normalizedPinch,
-    pinchStrength,
-    openPalmStrength,
+    pinchStrength: smoothedPinchStrength,
+    openPalmStrength: smoothedOpenPalmStrength,
     pinchStart,
     pinchHold,
     pinchRelease,

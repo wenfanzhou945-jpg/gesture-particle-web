@@ -58,8 +58,15 @@ export class ParticleScene {
   private fpsLastTs = 0;
   private lastTs = 0;
   private burstOrigin: Vec3 | null = null;
-  private previousHandWorld: Vec3 | null = null;
+  private previousRawHandWorld: Vec3 | null = null;
+  private lastGestureTimestamp = 0;
+  private visualHandWorld: Vec3 | null = null;
+  private visualIndexWorld: Vec3 | null = null;
   private handWind: Vec3 = { x: 0, y: 0, z: 0 };
+  private pinchBlend = 0;
+  private openPalmBlend = 0;
+  private handInfluenceBlend = 0;
+  private flickEnergy = 0;
 
   private resizeObserver?: ResizeObserver;
 
@@ -82,8 +89,33 @@ export class ParticleScene {
 
   public setInteractionState(state: FrameState): void {
     this.currentState = state;
+    if (state?.detected) {
+      const rawHandWorld = this.screenToWorld(state.handCenter);
+      const elapsedFrames =
+        this.lastGestureTimestamp > 0
+          ? clamp((state.timestampMs - this.lastGestureTimestamp) / 16.666, 0.5, 8)
+          : 1;
+
+      if (this.previousRawHandWorld) {
+        const vx = (rawHandWorld.x - this.previousRawHandWorld.x) / elapsedFrames;
+        const vy = (rawHandWorld.y - this.previousRawHandWorld.y) / elapsedFrames;
+        const vz = (rawHandWorld.z - this.previousRawHandWorld.z) / elapsedFrames;
+        const speed = Math.hypot(vx, vy, vz);
+        this.handWind.x = lerp(this.handWind.x, clamp(vx, -1.6, 1.6), 0.62);
+        this.handWind.y = lerp(this.handWind.y, clamp(vy, -1.6, 1.6), 0.62);
+        this.handWind.z = lerp(this.handWind.z, clamp(vz, -1.1, 1.1), 0.62);
+        this.flickEnergy = Math.max(this.flickEnergy, clamp(speed * 1.35, 0, 2.2));
+      }
+
+      this.previousRawHandWorld = rawHandWorld;
+      this.lastGestureTimestamp = state.timestampMs;
+    } else if (!state?.pinchRelease) {
+      this.previousRawHandWorld = null;
+      this.lastGestureTimestamp = 0;
+    }
+
     if (state?.pinchRelease) {
-      this.burstStrength = Math.max(this.burstStrength, 0.8 + state.pinchStrength * 0.85);
+      this.burstStrength = Math.max(this.burstStrength, 0.65 + Math.max(state.pinchStrength, this.pinchBlend) * 0.75);
       this.burstOrigin = this.screenToWorld(state.handCenter);
     }
     if (!state?.detected && state?.pinchRelease) {
@@ -284,32 +316,56 @@ export class ParticleScene {
   private tick(dt: number): void {
     const state = this.currentState;
     const hasHand = !!state?.detected;
-    const openPalm = state?.openPalmStrength ?? 0;
-    const handWorld = hasHand ? this.screenToWorld(state!.handCenter) : this.burstOrigin;
-    const indexWorld = hasHand ? this.screenToWorld(state!.indexTip) : handWorld;
+    const targetOpenPalm = state?.openPalmStrength ?? 0;
+    const rawHandWorld = hasHand ? this.screenToWorld(state!.handCenter) : this.burstOrigin;
+    const rawIndexWorld = hasHand ? this.screenToWorld(state!.indexTip) : rawHandWorld;
     const pinchHold = state?.pinchHold ?? false;
     const pinchStart = state?.pinchStart ?? false;
-    const pinchStrength = state?.pinchStrength ?? 0;
+    const targetPinchStrength = state?.pinchStrength ?? 0;
+    const targetPinchBlend = hasHand ? (pinchHold || pinchStart ? targetPinchStrength : targetPinchStrength * 0.16) : 0;
+
+    this.pinchBlend = lerp(this.pinchBlend, targetPinchBlend, 1 - Math.pow(0.78, dt));
+    this.openPalmBlend = lerp(this.openPalmBlend, targetOpenPalm, 1 - Math.pow(0.84, dt));
+    this.handInfluenceBlend = lerp(this.handInfluenceBlend, hasHand ? 1 : 0, 1 - Math.pow(0.82, dt));
+    this.handWind.x *= Math.pow(0.92, dt);
+    this.handWind.y *= Math.pow(0.92, dt);
+    this.handWind.z *= Math.pow(0.92, dt);
+    this.flickEnergy *= Math.pow(0.9, dt);
+
+    if (rawHandWorld && rawIndexWorld) {
+      const handFollow = 1 - Math.pow(0.74, dt);
+      this.visualHandWorld = this.visualHandWorld
+        ? {
+            x: lerp(this.visualHandWorld.x, rawHandWorld.x, handFollow),
+            y: lerp(this.visualHandWorld.y, rawHandWorld.y, handFollow),
+            z: lerp(this.visualHandWorld.z, rawHandWorld.z, handFollow),
+          }
+        : { ...rawHandWorld };
+      this.visualIndexWorld = this.visualIndexWorld
+        ? {
+            x: lerp(this.visualIndexWorld.x, rawIndexWorld.x, handFollow),
+            y: lerp(this.visualIndexWorld.y, rawIndexWorld.y, handFollow),
+            z: lerp(this.visualIndexWorld.z, rawIndexWorld.z, handFollow),
+          }
+        : { ...rawIndexWorld };
+    } else if (!hasHand) {
+      this.visualHandWorld = null;
+      this.visualIndexWorld = null;
+    }
+
+    const openPalm = this.openPalmBlend;
+    const pinchStrength = this.pinchBlend;
+    const handPresence = this.handInfluenceBlend;
+    const handWorld = this.visualHandWorld ?? rawHandWorld;
+    const indexWorld = this.visualIndexWorld ?? rawIndexWorld;
+    const windSpeed = Math.hypot(this.handWind.x, this.handWind.y, this.handWind.z);
+    const flick = clamp(windSpeed * 1.5 + this.flickEnergy, 0, 2.8);
 
     const scale = 1 + openPalm * 0.72;
-    const spring = SPRING_BASE * (1 + openPalm * 0.58 + (pinchHold ? 1.2 : 0));
-    const damping = pinchHold ? 0.84 : DAMPING_BASE - openPalm * 0.035;
+    const spring = SPRING_BASE * (1 + openPalm * 0.58 + pinchStrength * 0.82);
+    const damping = lerp(DAMPING_BASE - openPalm * 0.035, 0.865, pinchStrength);
     const t = performance.now();
     const seconds = t * 0.001;
-
-    if (hasHand && handWorld) {
-      if (this.previousHandWorld) {
-        this.handWind.x = lerp(this.handWind.x, handWorld.x - this.previousHandWorld.x, 0.34);
-        this.handWind.y = lerp(this.handWind.y, handWorld.y - this.previousHandWorld.y, 0.34);
-        this.handWind.z = lerp(this.handWind.z, handWorld.z - this.previousHandWorld.z, 0.34);
-      }
-      this.previousHandWorld = { ...handWorld };
-    } else {
-      this.previousHandWorld = null;
-      this.handWind.x *= 0.9;
-      this.handWind.y *= 0.9;
-      this.handWind.z *= 0.9;
-    }
 
     for (let i = 0; i < this.count; i += 1) {
       const i3 = i * 3;
@@ -335,8 +391,8 @@ export class ParticleScene {
         const pz = this.positions[i3 + 2];
         distToHand = Math.hypot(px - handWorld.x, py - handWorld.y, pz - handWorld.z);
 
-        if (pinchHold || pinchStart) {
-          // 捏合时向食指聚拢，形成能量团
+        if (pinchStrength > 0.04) {
+          // 捏合强度用连续插值驱动，避免一进入 pinch 状态就突然缩小。
           const gatherRadius = 0.42 + (1 - pinchStrength) * 1.55 + seed * 0.95;
           const dir = {
             x: this.randomDirs[i3 + 0],
@@ -376,6 +432,19 @@ export class ParticleScene {
           targetY += this.randomDirs[i3 + 1] * ripple + (px - indexWorld.x) * wave * 0.03;
           targetZ += this.randomDirs[i3 + 2] * ripple;
         }
+
+        if (flick > 0.06) {
+          const fieldRadius = 6.6 + flick * 1.15;
+          const handFalloff = clamp(1 - distToHand / fieldRadius, 0, 1);
+          const indexDist = Math.hypot(px - indexWorld.x, py - indexWorld.y, pz - indexWorld.z);
+          const indexFalloff = clamp(1 - indexDist / (fieldRadius * 0.72), 0, 1);
+          const wake = Math.max(handFalloff * handFalloff, indexFalloff * indexFalloff);
+          const side = Math.sin(phase * 2.6 + indexDist) * wake * flick;
+
+          this.velocities[i3 + 0] += (this.handWind.x * 0.34 - this.handWind.y * side * 0.035) * wake * dt;
+          this.velocities[i3 + 1] += (this.handWind.y * 0.34 + this.handWind.x * side * 0.035) * wake * dt;
+          this.velocities[i3 + 2] += (this.handWind.z * 0.2 + this.randomDirs[i3 + 2] * side * 0.035) * wake * dt;
+        }
       } else {
         // 无手状态回到发光球体，同时保留慢速漂浮感。
         const drift = Math.sin(phase * 1.6 + seed * 9) * 0.18;
@@ -410,20 +479,21 @@ export class ParticleScene {
 
       // 轻微高亮波动
       const glow = 0.24 + clamp(openPalm, 0, 1) * 0.55 + seed * 0.12;
-      const glowBoost = hasHand ? clamp(1 - distToHand / 5.2, 0, 1) * 0.48 : 0;
-      const pinchGlow = pinchHold ? 0.35 + pinchStrength * 0.5 : 0;
+      const glowBoost = hasHand ? clamp(1 - distToHand / 5.2, 0, 1) * 0.48 * handPresence : 0;
+      const pinchGlow = pinchStrength > 0.04 ? 0.2 + pinchStrength * 0.5 : 0;
+      const windGlow = clamp(flick * 0.18, 0, 0.32);
       this.colors[i3 + 0] = lerp(this.colors[i3 + 0], clamp(this.baseColors[i3 + 0] + glow * 0.22 + glowBoost + pinchGlow, 0, 1), 0.05);
-      this.colors[i3 + 1] = lerp(this.colors[i3 + 1], clamp(this.baseColors[i3 + 1] + glowBoost * 0.75 + pinchGlow * 0.72, 0, 1), 0.05);
-      this.colors[i3 + 2] = lerp(this.colors[i3 + 2], clamp(this.baseColors[i3 + 2] + glow * 0.16 + glowBoost + pinchGlow, 0, 1), 0.05);
+      this.colors[i3 + 1] = lerp(this.colors[i3 + 1], clamp(this.baseColors[i3 + 1] + glowBoost * 0.75 + pinchGlow * 0.72 + windGlow, 0, 1), 0.05);
+      this.colors[i3 + 2] = lerp(this.colors[i3 + 2], clamp(this.baseColors[i3 + 2] + glow * 0.16 + glowBoost + pinchGlow + windGlow, 0, 1), 0.05);
     }
 
     this.positionAttribute.needsUpdate = true;
     this.colorAttribute.needsUpdate = true;
     if (this.burstStrength > 0) this.burstStrength *= 0.9;
     if (this.burstStrength < 0.01) this.burstOrigin = null;
-    const glowScale = 20 + openPalm * 7 + (pinchHold ? pinchStrength * 8 : 0) + this.burstStrength * 4;
+    const glowScale = 20 + openPalm * 7 + pinchStrength * 8 + flick * 1.2 + this.burstStrength * 4;
     this.glow.scale.set(glowScale, glowScale, 1);
-    (this.glow.material as THREE.SpriteMaterial).opacity = 0.18 + openPalm * 0.08 + (pinchHold ? 0.18 : 0) + this.burstStrength * 0.1;
+    (this.glow.material as THREE.SpriteMaterial).opacity = 0.18 + openPalm * 0.08 + pinchStrength * 0.18 + clamp(flick * 0.04, 0, 0.08) + this.burstStrength * 0.1;
   }
 
   private screenToWorld(point: Vec3): Vec3 {
