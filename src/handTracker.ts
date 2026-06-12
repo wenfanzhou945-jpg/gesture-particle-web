@@ -9,6 +9,7 @@ import {
   HandGestureState,
   NormalizedLandmark,
 } from "./gestures";
+import { logEvent } from "./logger";
 import { clamp, Vec3 } from "./utils";
 
 export type TrackerStatus =
@@ -62,12 +63,18 @@ export class HandTracker {
   public async initialize(): Promise<void> {
     if (this.landmarker || this.destroyed) return;
     this.emitStatus("loading");
+    logEvent("info", "handtracker.initialize.start", {
+      frameSkip: this.frameSkip,
+      mirror: this.mirror,
+    });
     try {
       const resolver = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm"
       );
+      logEvent("info", "handtracker.fileset.ready");
       if (this.destroyed) return;
       try {
+        logEvent("info", "handtracker.create.gpu.start");
         this.landmarker = await HandLandmarker.createFromOptions(resolver, {
           baseOptions: {
             modelAssetPath:
@@ -77,8 +84,10 @@ export class HandTracker {
           runningMode: "VIDEO",
           numHands: 1,
         });
+        logEvent("info", "handtracker.create.gpu.ready");
       } catch {
         // 某些浏览器 GPU delegate 初始化失败时回退到 CPU，避免模型完全不可用
+        logEvent("warn", "handtracker.create.gpu.failed.cpu_fallback");
         this.landmarker = await HandLandmarker.createFromOptions(resolver, {
           baseOptions: {
             modelAssetPath:
@@ -88,13 +97,16 @@ export class HandTracker {
           runningMode: "VIDEO",
           numHands: 1,
         });
+        logEvent("info", "handtracker.create.cpu.ready");
       }
       this.emitStatus("ready");
       this.lastError = "";
+      logEvent("info", "handtracker.initialize.ready");
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown";
       this.lastError = message;
       this.emitStatus("error", message);
+      logEvent("error", "handtracker.initialize.failed", { message, error });
       this.onError?.("model", "MediaPipe 模型加载失败，已切换到触摸模式");
       throw error;
     }
@@ -165,6 +177,7 @@ export class HandTracker {
       return this.lastFrameState;
     } catch (error) {
       const message = error instanceof Error ? error.message : "hand detection error";
+      logEvent("error", "handtracker.detect.failed", { message, error });
       this.onError?.("other", message);
       const fallback = {
         ...this.lastFrameState,

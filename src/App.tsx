@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HandTracker, type HandTrackerStatus } from "./handTracker";
 import { type HandGestureState } from "./gestures";
+import {
+  getLogSessionId,
+  getLogText,
+  getRemoteLogStreamUrl,
+  getRemoteLogTopic,
+  logEvent,
+  subscribeLogs,
+  type LogEntry,
+} from "./logger";
 import { ParticleScene } from "./particleScene";
 import {
   clamp,
@@ -81,6 +90,8 @@ export function App(): JSX.Element {
   const [isTouchMode, setIsTouchMode] = useState<boolean>(true);
   const [isPreviewVisible, setIsPreviewVisible] = useState<boolean>(true);
   const [videoDiagnostics, setVideoDiagnostics] = useState<string>("video idle");
+  const [isLogVisible, setIsLogVisible] = useState<boolean>(false);
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
 
   const manualTouchRef = useRef<ManualTouchState>({
     pointers: new Map(),
@@ -198,6 +209,7 @@ export function App(): JSX.Element {
   );
 
   const applyTrackerStatus = useCallback((status: HandTrackerStatus) => {
+    logEvent("info", "tracker.status", status);
     setTrackerStatus(status.status);
   }, []);
 
@@ -219,6 +231,7 @@ export function App(): JSX.Element {
       if (trackerRef.current === tracker) {
         trackerRef.current = null;
       }
+      logEvent("error", "tracker.initialize.exception", { error });
       throw error;
     }
   }, [applyTrackerStatus, fallbackToTouchTracking, facingMode]);
@@ -251,8 +264,18 @@ export function App(): JSX.Element {
   const startCamera = useCallback(
     async (nextFacing: CameraFacing = facingMode): Promise<void> => {
       if (isStartingCameraRef.current) return;
+      logEvent("info", "camera.start.request", {
+        facingMode: nextFacing,
+        secureContext: window.isSecureContext,
+        mediaDevices: !!navigator.mediaDevices,
+        getUserMedia: !!navigator.mediaDevices?.getUserMedia,
+      });
       if (!isHttpsOrLocalhost() || !navigator.mediaDevices?.getUserMedia) {
         setCameraStatus("当前页面不是 HTTPS/localhost，浏览器禁止摄像头访问");
+        logEvent("error", "camera.start.blocked.insecure_or_missing_api", {
+          protocol: window.location.protocol,
+          host: window.location.host,
+        });
         enableTouchMode("当前页面不是 HTTPS/localhost，浏览器禁止摄像头访问");
         return;
       }
@@ -280,6 +303,16 @@ export function App(): JSX.Element {
             frameRate: { ideal: 15, max: 24 },
           },
         });
+        logEvent("info", "camera.stream.ready", {
+          tracks: stream.getTracks().map((track) => ({
+            kind: track.kind,
+            label: track.label,
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+            settings: track.getSettings?.(),
+          })),
+        });
 
         if (!videoRef.current) return;
 
@@ -306,6 +339,12 @@ export function App(): JSX.Element {
         });
 
         await videoRef.current.play();
+        logEvent("info", "camera.video.play.resolved", {
+          readyState: videoRef.current.readyState,
+          paused: videoRef.current.paused,
+          videoWidth: videoRef.current.videoWidth,
+          videoHeight: videoRef.current.videoHeight,
+        });
         startPreviewLoop(nextFacing === "user");
 
         isCameraRunningRef.current = true;
@@ -332,6 +371,10 @@ export function App(): JSX.Element {
       } catch (error) {
         isStartingCameraRef.current = false;
         const name = error instanceof DOMException ? error.name : "";
+        logEvent("error", "camera.start.failed", {
+          name,
+          error,
+        });
         if (name === "NotAllowedError" || name === "SecurityError") {
           enableTouchMode("摄像头权限被拒绝，可使用触摸模式体验");
         } else {
@@ -342,6 +385,16 @@ export function App(): JSX.Element {
     },
     [enableTouchMode, facingMode, fallbackToTouchTracking, initTracker, publishInteraction, publishStatus]
   );
+
+  const copyDiagnostics = useCallback(async () => {
+    const text = getLogText();
+    try {
+      await navigator.clipboard.writeText(text);
+      logEvent("info", "diagnostics.copy.success", { length: text.length });
+    } catch (error) {
+      logEvent("error", "diagnostics.copy.failed", { error });
+    }
+  }, []);
 
   const switchCamera = useCallback(async () => {
     const nextFacing = facingMode === "user" ? "environment" : "user";
@@ -601,6 +654,10 @@ export function App(): JSX.Element {
   }, [startTrackLoop, stopCamera, stopPreviewLoop]);
 
   useEffect(() => {
+    return subscribeLogs(setLogEntries);
+  }, []);
+
+  useEffect(() => {
     const root = sceneContainerRef.current;
     if (!root) return;
 
@@ -630,6 +687,32 @@ export function App(): JSX.Element {
   useEffect(() => {
     sceneRef.current?.setQuality(quality);
   }, [quality]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const emit = (event: Event) => {
+      logEvent(event.type === "error" ? "error" : "info", `video.${event.type}`, {
+        readyState: video.readyState,
+        networkState: video.networkState,
+        paused: video.paused,
+        currentTime: video.currentTime,
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        error: video.error
+          ? {
+              code: video.error.code,
+              message: video.error.message,
+            }
+          : null,
+      });
+    };
+
+    const events = ["loadedmetadata", "loadeddata", "canplay", "playing", "pause", "stalled", "suspend", "waiting", "error"];
+    events.forEach((name) => video.addEventListener(name, emit));
+    return () => events.forEach((name) => video.removeEventListener(name, emit));
+  }, []);
 
   return (
     <div className="app">
@@ -673,6 +756,9 @@ export function App(): JSX.Element {
           <button type="button" onClick={() => setShowFps((prev) => !prev)}>
             {showFps ? "关闭FPS" : "显示FPS"}
           </button>
+          <button type="button" onClick={() => setIsLogVisible((prev) => !prev)}>
+            {isLogVisible ? "隐藏日志" : "显示日志"}
+          </button>
         </div>
 
         <div className="state-strip">
@@ -682,6 +768,23 @@ export function App(): JSX.Element {
           <span>{videoDiagnostics}</span>
         </div>
       </div>
+
+      {isLogVisible && (
+        <div className="log-panel">
+          <div className="log-panel-header">
+            <span>诊断日志 {getLogSessionId()}</span>
+            <button type="button" onClick={copyDiagnostics}>复制日志</button>
+          </div>
+          <div className="log-meta">remote topic: {getRemoteLogTopic()}</div>
+          <div className="log-meta">{getRemoteLogStreamUrl()}</div>
+          <pre>
+            {logEntries
+              .slice(-80)
+              .map((entry) => `${entry.time} ${entry.level.toUpperCase()} ${entry.event} ${entry.data === undefined ? "" : JSON.stringify(entry.data)}`)
+              .join("\n")}
+          </pre>
+        </div>
+      )}
 
       <div className={`camera-preview ${isPreviewVisible ? "show" : "hide"}`}>
         <video
