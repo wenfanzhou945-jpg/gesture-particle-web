@@ -204,11 +204,17 @@ button.active {
 }
 
 .camera-preview video {
-  opacity: 0.01;
+  opacity: 1;
+  z-index: 1;
 }
 
 .camera-preview canvas {
-  opacity: 1;
+  opacity: 0;
+  z-index: 0;
+}
+
+.camera-preview.canvas-ready canvas {
+  opacity: 0;
 }
 
 .camera-preview video.mirror {

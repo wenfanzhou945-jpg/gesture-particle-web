@@ -90,6 +90,7 @@ export function App(): JSX.Element {
   const [isTouchMode, setIsTouchMode] = useState<boolean>(true);
   const [isPreviewVisible, setIsPreviewVisible] = useState<boolean>(true);
   const [videoDiagnostics, setVideoDiagnostics] = useState<string>("video idle");
+  const [hasCanvasPreviewFrame, setHasCanvasPreviewFrame] = useState<boolean>(false);
   const [isLogVisible, setIsLogVisible] = useState<boolean>(false);
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
 
@@ -142,6 +143,8 @@ export function App(): JSX.Element {
 
   const startPreviewLoop = useCallback((mirror: boolean) => {
     stopPreviewLoop();
+    setHasCanvasPreviewFrame(false);
+    let reportedFirstFrame = false;
 
     const draw = () => {
       const video = videoRef.current;
@@ -149,17 +152,36 @@ export function App(): JSX.Element {
       const ctx = canvas?.getContext("2d");
 
       if (video && canvas && ctx && video.videoWidth > 0 && video.videoHeight > 0) {
-        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
+        try {
+          if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+          }
+          ctx.save();
+          if (mirror) {
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+          }
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
+
+          if (!reportedFirstFrame) {
+            reportedFirstFrame = true;
+            setHasCanvasPreviewFrame(true);
+            logEvent("info", "preview.canvas.first_frame", {
+              canvasWidth: canvas.width,
+              canvasHeight: canvas.height,
+              videoWidth: video.videoWidth,
+              videoHeight: video.videoHeight,
+              readyState: video.readyState,
+            });
+          }
+        } catch (error) {
+          if (!reportedFirstFrame) {
+            reportedFirstFrame = true;
+            logEvent("error", "preview.canvas.draw.failed", { error });
+          }
         }
-        ctx.save();
-        if (mirror) {
-          ctx.translate(canvas.width, 0);
-          ctx.scale(-1, 1);
-        }
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        ctx.restore();
       }
 
       previewRafRef.current = requestAnimationFrame(draw);
@@ -264,6 +286,11 @@ export function App(): JSX.Element {
   const startCamera = useCallback(
     async (nextFacing: CameraFacing = facingMode): Promise<void> => {
       if (isStartingCameraRef.current) return;
+      if (isCameraRunningRef.current && streamRef.current) {
+        logEvent("info", "camera.start.ignored.already_running");
+        setStatusList([trackerStatusText[trackerStatus], statusText.cameraReady, statusText.noHand]);
+        return;
+      }
       logEvent("info", "camera.start.request", {
         facingMode: nextFacing,
         secureContext: window.isSecureContext,
@@ -287,6 +314,7 @@ export function App(): JSX.Element {
       setCameraStatus("camera starting...");
       setStatusList([trackerStatusText[trackerStatus], "camera starting...", statusText.noHand]);
       setVideoDiagnostics("requesting camera");
+      setHasCanvasPreviewFrame(false);
 
       try {
         if (streamRef.current) {
@@ -786,7 +814,7 @@ export function App(): JSX.Element {
         </div>
       )}
 
-      <div className={`camera-preview ${isPreviewVisible ? "show" : "hide"}`}>
+      <div className={`camera-preview ${isPreviewVisible ? "show" : "hide"} ${hasCanvasPreviewFrame ? "canvas-ready" : ""}`}>
         <video
           ref={videoRef}
           className={facingMode === "user" ? "mirror" : ""}
