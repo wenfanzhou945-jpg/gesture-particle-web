@@ -54,12 +54,15 @@ function mapQualityFromDevice(profile: "low" | "standard" | "high"): QualityMode
 export function App(): JSX.Element {
   const sceneContainerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const sceneRef = useRef<ParticleScene | null>(null);
   const trackerRef = useRef<HandTracker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
+  const previewRafRef = useRef<number>(0);
   const isMountedRef = useRef<boolean>(true);
   const isCameraRunningRef = useRef<boolean>(false);
+  const isStartingCameraRef = useRef<boolean>(false);
   const isTouchModeRef = useRef<boolean>(true);
   const longPressTimerRef = useRef<number | null>(null);
   const statusThrottleRef = useRef<number>(0);
@@ -77,6 +80,7 @@ export function App(): JSX.Element {
   const [isCameraRunning, setIsCameraRunning] = useState<boolean>(false);
   const [isTouchMode, setIsTouchMode] = useState<boolean>(true);
   const [isPreviewVisible, setIsPreviewVisible] = useState<boolean>(true);
+  const [videoDiagnostics, setVideoDiagnostics] = useState<string>("video idle");
 
   const manualTouchRef = useRef<ManualTouchState>({
     pointers: new Map(),
@@ -118,7 +122,43 @@ export function App(): JSX.Element {
     [cameraStatus, isTouchMode, trackerStatus]
   );
 
+  const stopPreviewLoop = useCallback(() => {
+    if (previewRafRef.current) {
+      cancelAnimationFrame(previewRafRef.current);
+      previewRafRef.current = 0;
+    }
+  }, []);
+
+  const startPreviewLoop = useCallback((mirror: boolean) => {
+    stopPreviewLoop();
+
+    const draw = () => {
+      const video = videoRef.current;
+      const canvas = previewCanvasRef.current;
+      const ctx = canvas?.getContext("2d");
+
+      if (video && canvas && ctx && video.videoWidth > 0 && video.videoHeight > 0) {
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+        }
+        ctx.save();
+        if (mirror) {
+          ctx.translate(canvas.width, 0);
+          ctx.scale(-1, 1);
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+      }
+
+      previewRafRef.current = requestAnimationFrame(draw);
+    };
+
+    previewRafRef.current = requestAnimationFrame(draw);
+  }, [stopPreviewLoop]);
+
   const stopCamera = useCallback(() => {
+    stopPreviewLoop();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -127,10 +167,12 @@ export function App(): JSX.Element {
       videoRef.current.srcObject = null;
     }
     isCameraRunningRef.current = false;
+    isStartingCameraRef.current = false;
     setIsCameraRunning(false);
     setCameraStatus("未启动摄像头");
+    setVideoDiagnostics("video idle");
     resetStatusList();
-  }, [resetStatusList]);
+  }, [resetStatusList, stopPreviewLoop]);
 
   const enableTouchMode = useCallback(
     (reason: string) => {
@@ -208,6 +250,7 @@ export function App(): JSX.Element {
 
   const startCamera = useCallback(
     async (nextFacing: CameraFacing = facingMode): Promise<void> => {
+      if (isStartingCameraRef.current) return;
       if (!isHttpsOrLocalhost() || !navigator.mediaDevices?.getUserMedia) {
         setCameraStatus("当前页面不是 HTTPS/localhost，浏览器禁止摄像头访问");
         enableTouchMode("当前页面不是 HTTPS/localhost，浏览器禁止摄像头访问");
@@ -215,20 +258,30 @@ export function App(): JSX.Element {
       }
       if (!videoRef.current) return;
 
+      isStartingCameraRef.current = true;
       isTouchModeRef.current = false;
       setIsTouchMode(false);
       setCameraStatus("camera starting...");
+      setStatusList([trackerStatusText[trackerStatus], "camera starting...", statusText.noHand]);
+      setVideoDiagnostics("requesting camera");
 
       try {
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
+
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
-            facingMode: { ideal: nextFacing },
-            width: { ideal: 960 },
-            height: { ideal: 540 },
-            frameRate: { ideal: 24, max: 30 },
+            facingMode: nextFacing,
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            frameRate: { ideal: 15, max: 24 },
           },
         });
+
+        if (!videoRef.current) return;
 
         streamRef.current = stream;
         videoRef.current.srcObject = stream;
@@ -237,20 +290,33 @@ export function App(): JSX.Element {
         videoRef.current.setAttribute("muted", "");
         videoRef.current.setAttribute("playsinline", "");
         videoRef.current.setAttribute("webkit-playsinline", "");
-        await new Promise<void>((resolve) => {
+        videoRef.current.autoplay = true;
+
+        await new Promise<void>((resolve, reject) => {
           const video = videoRef.current;
           if (!video || video.readyState >= HTMLMediaElement.HAVE_METADATA) {
             resolve();
             return;
           }
-          video.onloadedmetadata = () => resolve();
+          const timeout = window.setTimeout(() => reject(new Error("video metadata timeout")), 5000);
+          video.onloadedmetadata = () => {
+            window.clearTimeout(timeout);
+            resolve();
+          };
         });
+
         await videoRef.current.play();
+        startPreviewLoop(nextFacing === "user");
 
         isCameraRunningRef.current = true;
+        isStartingCameraRef.current = false;
         setIsCameraRunning(true);
         setFacingMode(nextFacing);
         setCameraStatus(statusText.cameraReady);
+        setStatusList([trackerStatusText[trackerStatus], statusText.cameraReady, statusText.noHand]);
+        setVideoDiagnostics(
+          `video ${videoRef.current.videoWidth}x${videoRef.current.videoHeight} readyState=${videoRef.current.readyState}`
+        );
         publishInteraction(null);
         publishStatus(null);
 
@@ -264,11 +330,13 @@ export function App(): JSX.Element {
           fallbackToTouchTracking("模型加载失败，摄像头预览保留，可使用触摸模式");
         }
       } catch (error) {
+        isStartingCameraRef.current = false;
         const name = error instanceof DOMException ? error.name : "";
         if (name === "NotAllowedError" || name === "SecurityError") {
           enableTouchMode("摄像头权限被拒绝，可使用触摸模式体验");
         } else {
-          enableTouchMode("摄像头启动失败，已进入触摸模式");
+          const message = error instanceof Error ? error.message : "unknown camera error";
+          enableTouchMode(`摄像头启动失败：${message}，已进入触摸模式`);
         }
       }
     },
@@ -528,8 +596,9 @@ export function App(): JSX.Element {
         window.clearTimeout(longPressTimerRef.current);
         longPressTimerRef.current = null;
       }
+      stopPreviewLoop();
     };
-  }, [startTrackLoop, stopCamera]);
+  }, [startTrackLoop, stopCamera, stopPreviewLoop]);
 
   useEffect(() => {
     const root = sceneContainerRef.current;
@@ -610,16 +679,21 @@ export function App(): JSX.Element {
           <span>粒子: {qualityToCount(quality)}</span>
           {showFps && <span>FPS: {fps}</span>}
           <span>模式: {isTouchMode ? "触摸模式" : "摄像头模式"}</span>
+          <span>{videoDiagnostics}</span>
         </div>
       </div>
 
-      <video
-        ref={videoRef}
-        className={`camera-preview ${isPreviewVisible ? "show" : "hide"} ${facingMode === "user" ? "mirror" : ""}`}
-        autoPlay
-        muted
-        playsInline
-      />
+      <div className={`camera-preview ${isPreviewVisible ? "show" : "hide"}`}>
+        <video
+          ref={videoRef}
+          className={facingMode === "user" ? "mirror" : ""}
+          autoPlay
+          muted
+          playsInline
+          webkit-playsinline=""
+        />
+        <canvas ref={previewCanvasRef} aria-label="camera preview" />
+      </div>
     </div>
   );
 }
