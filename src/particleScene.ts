@@ -2,7 +2,7 @@ import * as THREE from "three";
 import {
   clamp,
   createRadialGlowTexture,
-  distance3D,
+  isLikelyMobile,
   lerp,
   qualityToCount,
   type QualityMode,
@@ -73,6 +73,7 @@ export class ParticleScene {
   public setQuality(quality: QualityMode): void {
     if (this.quality === quality) return;
     this.quality = quality;
+    this.updatePixelRatio();
     this.buildScene(qualityToCount(quality));
   }
 
@@ -93,6 +94,7 @@ export class ParticleScene {
     this.height = Math.max(this.container.clientHeight, 1);
     this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
+    this.updatePixelRatio();
     this.renderer.setSize(this.width, this.height, false);
   }
 
@@ -123,10 +125,11 @@ export class ParticleScene {
     this.camera.position.set(0, 0, 25);
 
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: !isLikelyMobile(),
       alpha: false,
+      powerPreference: "high-performance",
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.updatePixelRatio();
     this.renderer.setClearColor(0x060011, 1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.container.appendChild(this.renderer.domElement);
@@ -135,6 +138,12 @@ export class ParticleScene {
     this.resizeObserver.observe(this.container);
 
     this.createGlowSprite();
+  }
+
+  private updatePixelRatio(): void {
+    if (!this.renderer) return;
+    const maxRatio = isLikelyMobile() ? (this.quality === "low" ? 1.1 : 1.35) : 2;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxRatio));
   }
 
   private createGlowSprite(): void {
@@ -290,10 +299,7 @@ export class ParticleScene {
         const px = this.positions[i3 + 0];
         const py = this.positions[i3 + 1];
         const pz = this.positions[i3 + 2];
-        const distToHand = distance3D(
-          { x: px, y: py, z: pz },
-          { x: handWorld.x, y: handWorld.y, z: handWorld.z }
-        );
+        distToHand = Math.hypot(px - handWorld.x, py - handWorld.y, pz - handWorld.z);
 
         if (pinchHold || pinchStart) {
           // 捏合时向食指聚拢，形成能量团
@@ -365,9 +371,9 @@ export class ParticleScene {
       // 轻微高亮波动
       const glow = 0.2 + clamp(openPalm, 0, 1) * 0.5 + seed * 0.1;
       const glowBoost = hasHand ? clamp(1 - distToHand / 4.5, 0, 1) * 0.35 : 0;
-      this.colors[i3 + 0] = lerp(this.colors[i3 + 0], clamp(glow + glowBoost, 0, 1), 0.05);
-      this.colors[i3 + 1] = lerp(this.colors[i3 + 1], clamp((this.baseColors[i3 + 1] + glowBoost) * 0.9, 0, 1), 0.05);
-      this.colors[i3 + 2] = lerp(this.colors[i3 + 2], clamp((this.baseColors[i3 + 2] + glowBoost) * 0.95, 0, 1), 0.05);
+      this.colors[i3 + 0] = lerp(this.colors[i3 + 0], clamp(this.baseColors[i3 + 0] + glow * 0.35 + glowBoost, 0, 1), 0.04);
+      this.colors[i3 + 1] = lerp(this.colors[i3 + 1], clamp(this.baseColors[i3 + 1] + glowBoost * 0.65, 0, 1), 0.04);
+      this.colors[i3 + 2] = lerp(this.colors[i3 + 2], clamp(this.baseColors[i3 + 2] + glowBoost, 0, 1), 0.04);
     }
 
     this.positionAttribute.needsUpdate = true;

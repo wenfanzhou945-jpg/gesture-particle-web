@@ -201,22 +201,31 @@ export function App(): JSX.Element {
       setCameraStatus("camera starting...");
 
       try {
-        if (!trackerRef.current) {
-          await initTracker();
-        } else {
-          trackerRef.current.setMirror(nextFacing === "user");
-        }
-
         const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
           video: {
             facingMode: { ideal: nextFacing },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 960 },
+            height: { ideal: 540 },
+            frameRate: { ideal: 24, max: 30 },
           },
         });
 
         streamRef.current = stream;
         videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
+        videoRef.current.playsInline = true;
+        videoRef.current.setAttribute("muted", "");
+        videoRef.current.setAttribute("playsinline", "");
+        videoRef.current.setAttribute("webkit-playsinline", "");
+        await new Promise<void>((resolve) => {
+          const video = videoRef.current;
+          if (!video || video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+            resolve();
+            return;
+          }
+          video.onloadedmetadata = () => resolve();
+        });
         await videoRef.current.play();
 
         isCameraRunningRef.current = true;
@@ -225,6 +234,16 @@ export function App(): JSX.Element {
         setCameraStatus(statusText.cameraReady);
         publishInteraction(null);
         publishStatus(null);
+
+        try {
+          if (!trackerRef.current) {
+            await initTracker();
+          } else {
+            trackerRef.current.setMirror(nextFacing === "user");
+          }
+        } catch {
+          enableTouchMode("模型加载失败，已进入触摸模式");
+        }
       } catch (error) {
         const name = error instanceof DOMException ? error.name : "";
         if (name === "NotAllowedError" || name === "SecurityError") {

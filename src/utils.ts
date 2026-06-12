@@ -64,10 +64,24 @@ export const qualityToCount = (quality: QualityMode): number => {
   }
 };
 
+export const isLikelyMobile = (): boolean => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const coarsePointer = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || !!coarsePointer;
+};
+
 export const detectDeviceProfile = (): DevicePerformanceProfile => {
   const cores = navigator.hardwareConcurrency || 4;
   const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  const mobile = isLikelyMobile();
 
+  if (mobile && (cores <= 6 || (typeof memory === "number" && memory <= 4))) {
+    return "low";
+  }
+  if (mobile) {
+    return "standard";
+  }
   if (cores <= 4 || (typeof memory === "number" && memory <= 2)) {
     return "low";
   }
