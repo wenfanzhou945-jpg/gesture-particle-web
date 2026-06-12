@@ -144,6 +144,17 @@ export function App(): JSX.Element {
     [publishInteraction, resetStatusList, stopCamera]
   );
 
+  const fallbackToTouchTracking = useCallback(
+    (reason: string) => {
+      isTouchModeRef.current = true;
+      setIsTouchMode(true);
+      setCameraStatus(reason);
+      resetStatusList(reason);
+      publishInteraction(null);
+    },
+    [publishInteraction, resetStatusList]
+  );
+
   const applyTrackerStatus = useCallback((status: HandTrackerStatus) => {
     setTrackerStatus(status.status);
   }, []);
@@ -155,12 +166,20 @@ export function App(): JSX.Element {
       mirror: facingMode === "user",
       onStatusChange: applyTrackerStatus,
       onError: () => {
-        enableTouchMode("模型加载失败，已进入触摸模式");
+        fallbackToTouchTracking("模型加载失败，摄像头预览保留，可使用触摸模式");
       },
     });
     trackerRef.current = tracker;
-    await tracker.initialize();
-  }, [applyTrackerStatus, enableTouchMode, facingMode]);
+    try {
+      await tracker.initialize();
+    } catch (error) {
+      tracker.dispose();
+      if (trackerRef.current === tracker) {
+        trackerRef.current = null;
+      }
+      throw error;
+    }
+  }, [applyTrackerStatus, fallbackToTouchTracking, facingMode]);
 
   const startTrackLoop = useCallback(() => {
     const loop = async (time: number): Promise<void> => {
@@ -242,7 +261,7 @@ export function App(): JSX.Element {
             trackerRef.current.setMirror(nextFacing === "user");
           }
         } catch {
-          enableTouchMode("模型加载失败，已进入触摸模式");
+          fallbackToTouchTracking("模型加载失败，摄像头预览保留，可使用触摸模式");
         }
       } catch (error) {
         const name = error instanceof DOMException ? error.name : "";
@@ -253,7 +272,7 @@ export function App(): JSX.Element {
         }
       }
     },
-    [enableTouchMode, facingMode, initTracker, publishInteraction, publishStatus]
+    [enableTouchMode, facingMode, fallbackToTouchTracking, initTracker, publishInteraction, publishStatus]
   );
 
   const switchCamera = useCallback(async () => {

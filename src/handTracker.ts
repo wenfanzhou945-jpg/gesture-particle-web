@@ -71,7 +71,7 @@ export class HandTracker {
         this.landmarker = await HandLandmarker.createFromOptions(resolver, {
           baseOptions: {
             modelAssetPath:
-              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker.task",
+              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task",
             delegate: "GPU",
           },
           runningMode: "VIDEO",
@@ -82,7 +82,7 @@ export class HandTracker {
         this.landmarker = await HandLandmarker.createFromOptions(resolver, {
           baseOptions: {
             modelAssetPath:
-              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker.task",
+              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task",
             delegate: "CPU",
           },
           runningMode: "VIDEO",
