@@ -76,6 +76,7 @@ export function App(): JSX.Element {
   const longPressTimerRef = useRef<number | null>(null);
   const statusThrottleRef = useRef<number>(0);
   const showFpsRef = useRef<boolean>(true);
+  const publishStatusRef = useRef<(state: HandGestureState | null) => void>(() => undefined);
 
   const [quality, setQuality] = useState<QualityMode>(mapQualityFromDevice(detectDeviceProfile()));
   const [facingMode, setFacingMode] = useState<CameraFacing>("user");
@@ -191,6 +192,11 @@ export function App(): JSX.Element {
   }, [stopPreviewLoop]);
 
   const stopCamera = useCallback(() => {
+    logEvent("warn", "camera.stop.called", {
+      hasStream: !!streamRef.current,
+      isCameraRunning: isCameraRunningRef.current,
+      stack: new Error().stack,
+    });
     stopPreviewLoop();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -267,21 +273,21 @@ export function App(): JSX.Element {
           const nextState = await trackerRef.current.detect(videoRef.current, time);
           if (nextState.detected) {
             publishInteraction(nextState);
-            publishStatus(nextState);
+            publishStatusRef.current(nextState);
           } else {
             publishInteraction(null);
-            publishStatus(null);
+            publishStatusRef.current(null);
           }
         } catch {
           publishInteraction(null);
-          publishStatus(null);
+          publishStatusRef.current(null);
         }
       }
 
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
-  }, [publishInteraction, publishStatus]);
+  }, [publishInteraction]);
 
   const startCamera = useCallback(
     async (nextFacing: CameraFacing = facingMode): Promise<void> => {
@@ -643,6 +649,10 @@ export function App(): JSX.Element {
   );
 
   useEffect(() => {
+    publishStatusRef.current = publishStatus;
+  }, [publishStatus]);
+
+  useEffect(() => {
     isMountedRef.current = true;
     if (!sceneContainerRef.current) return;
 
@@ -670,7 +680,17 @@ export function App(): JSX.Element {
       window.removeEventListener("resize", onResize);
       window.removeEventListener("orientationchange", onResize);
       scene.dispose();
-      stopCamera();
+      logEvent("warn", "app.unmount.cleanup");
+      stopPreviewLoop();
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      isCameraRunningRef.current = false;
+      isStartingCameraRef.current = false;
       trackerRef.current?.dispose();
       trackerRef.current = null;
       if (longPressTimerRef.current !== null) {
@@ -679,7 +699,7 @@ export function App(): JSX.Element {
       }
       stopPreviewLoop();
     };
-  }, [startTrackLoop, stopCamera, stopPreviewLoop]);
+  }, []);
 
   useEffect(() => {
     return subscribeLogs(setLogEntries);
